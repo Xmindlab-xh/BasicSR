@@ -1,0 +1,29 @@
+name: test_simple_esrgan
+model_type: ESRGANModel
+scale: 4
+num_gpu: 1
+
+datasets:
+  test_1:
+    name: simple_test
+    type: SingleImageDataset
+    dataroot_lq: datasets/simple_test
+    io_backend:
+      type: disk
+
+network_g:
+  type: RRDBNet
+  num_in_ch: 3
+  num_out_ch: 3
+  num_feat: 64
+  num_block: 23
+  num_grow_ch: 32
+  scale: 4
+
+path:
+  pretrain_network_g: experiments/pretrained_models/ESRGAN/ESRGAN_SRx4_DF2KOST_official-ff704c30.pth
+  strict_load_g: true
+
+val:
+  save_img: true
+  suffix: ~  # 或者写成 null，表示不加后缀
