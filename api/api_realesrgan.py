@@ -87,7 +87,7 @@ async def superres_image(file: UploadFile = File(...)):
     # 输出文件名加 _completed
     original_output_file = os.path.join(output_dir, f"{filename_base}{ext}")  # RealESRGAN 输出默认带 suffix
     completed_file = os.path.join(output_dir, f"{filename_base}_completed{ext}")
-    logger.info(f"original_output_file: {original_output_file}\completed_file{completed_file}")
+    logger.info(f"original_output_file: {original_output_file}\ncompleted_file{completed_file}")
 
     if not os.path.exists(original_output_file):
         raise RuntimeError(f"输出文件不存在: {original_output_file}")
