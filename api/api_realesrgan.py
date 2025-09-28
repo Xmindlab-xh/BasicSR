@@ -4,7 +4,7 @@ import uuid
 import subprocess
 import logging
 from logging.handlers import TimedRotatingFileHandler
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 
 # ----------------- 日志配置 -----------------
@@ -54,7 +54,12 @@ def run_realesrgan_image(input_path: str, output_dir: str, model_name="RealESRGA
         "-n", model_name,
         "--suffix", suffix
     ]
-    subprocess.run(cmd, check=True)
+    logger.info(f"执行命令: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.error(f"RealESRGAN 执行失败: {result.stderr}")
+        raise RuntimeError(f"RealESRGAN 执行失败: {result.stderr}")
+    return result
 
 def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-animevideov3", suffix=""):
     num_process = 1
@@ -67,70 +72,200 @@ def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-a
         "--suffix", suffix,
         "--num_process", str(num_process)
     ]
-    subprocess.run(cmd, check=True)
+    logger.info(f"执行命令: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.error(f"RealESRGAN 视频处理失败: {result.stderr}")
+        raise RuntimeError(f"RealESRGAN 视频处理失败: {result.stderr}")
+    return result
+
+def find_output_file(output_dir: str, original_filename: str, suffix: str):
+    """查找实际生成的输出文件"""
+    # 可能的输出文件名格式
+    base_name = os.path.splitext(original_filename)[0]
+    ext = os.path.splitext(original_filename)[1]
+
+    possible_names = [
+        f"{base_name}_{suffix}_out{ext}",  # 常见格式: filename_suffix_out.ext
+        f"{base_name}_out{ext}",          # 格式: filename_out.ext
+        f"{base_name}_{suffix}{ext}",     # 格式: filename_suffix.ext
+        f"{base_name}{ext}",              # 原文件名
+    ]
+
+    logger.info(f"查找输出文件，目录: {output_dir}")
+    logger.info(f"可能的文件名: {possible_names}")
+
+    # 列出输出目录中的所有文件进行调试
+    if os.path.exists(output_dir):
+        files_in_dir = os.listdir(output_dir)
+        logger.info(f"输出目录中的文件: {files_in_dir}")
+
+        # 先检查预期的文件名
+        for name in possible_names:
+            full_path = os.path.join(output_dir, name)
+            if os.path.exists(full_path):
+                logger.info(f"找到输出文件: {full_path}")
+                return full_path
+
+        # 如果找不到预期文件名，返回目录中第一个文件（如果有的话）
+        if files_in_dir:
+            # 过滤掉可能的输入文件，只要处理后的文件
+            processed_files = [f for f in files_in_dir if not f.endswith('_input' + ext)]
+            if processed_files:
+                found_file = os.path.join(output_dir, processed_files[0])
+                logger.info(f"使用找到的文件: {found_file}")
+                return found_file
+
+    return None
 
 @app.post("/superres-image")
 async def superres_image(file: UploadFile = File(...)):
     unique_id = get_unique_name()
-    ext = os.path.splitext(file.filename)[1]  # 保留原始后缀
-    filename_base = f"{os.path.splitext(file.filename)[0]}_{unique_id}"
-    input_path = os.path.join(TMP_DIR, f"{filename_base}{ext}")
-    output_dir = os.path.join(TMP_DIR, filename_base)
+    ext = os.path.splitext(file.filename)[1].lower()
+    original_name = os.path.splitext(file.filename)[0]
+
+    # 输入文件路径
+    input_filename = f"{original_name}_{unique_id}{ext}"
+    input_path = os.path.join(TMP_DIR, input_filename)
+
+    # 输出目录
+    output_dir = os.path.join(TMP_DIR, f"output_{unique_id}")
     os.makedirs(output_dir, exist_ok=True)
 
-    with open(input_path, "wb") as f:
-        f.write(await file.read())
+    logger.info(f"处理图片: {file.filename}")
+    logger.info(f"输入路径: {input_path}")
+    logger.info(f"输出目录: {output_dir}")
 
-    run_realesrgan_image(input_path, output_dir, suffix=unique_id)
-    logger.info(f"input_path: {input_path}\noutput_dir：{output_dir}")
+    try:
+        # 保存上传的文件
+        with open(input_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
 
-    # 输出文件名加 _completed
-    original_output_file = os.path.join(output_dir, f"{filename_base}{ext}")  # RealESRGAN 输出默认带 suffix
-    completed_file = os.path.join(output_dir, f"{filename_base}_completed{ext}")
-    logger.info(f"original_output_file: {original_output_file}\ncompleted_file{completed_file}")
+        # 执行 RealESRGAN
+        run_realesrgan_image(input_path, output_dir, suffix=unique_id)
 
-    if not os.path.exists(original_output_file):
-        raise RuntimeError(f"输出文件不存在: {original_output_file}")
+        # 查找实际生成的输出文件
+        output_file = find_output_file(output_dir, file.filename, unique_id)
 
-    os.rename(original_output_file, completed_file)
+        if not output_file or not os.path.exists(output_file):
+            raise HTTPException(status_code=500, detail=f"找不到输出文件，输出目录: {output_dir}")
 
-    response = FileResponse(completed_file, filename=os.path.basename(completed_file))
+        # 重命名为最终文件
+        final_filename = f"{original_name}_enhanced{ext}"
+        final_path = os.path.join(output_dir, final_filename)
 
-    # 清理临时文件
-    shutil.rmtree(output_dir, ignore_errors=True)
-    if os.path.exists(input_path):
-        os.remove(input_path)
+        if output_file != final_path:
+            os.rename(output_file, final_path)
 
-    return response
+        logger.info(f"处理完成，返回文件: {final_path}")
+
+        # 返回文件
+        def cleanup_files():
+            """清理临时文件"""
+            try:
+                if os.path.exists(input_path):
+                    os.remove(input_path)
+                if os.path.exists(output_dir):
+                    shutil.rmtree(output_dir)
+                logger.info("临时文件清理完成")
+            except Exception as e:
+                logger.error(f"清理文件时出错: {e}")
+
+        response = FileResponse(
+            final_path,
+            filename=final_filename,
+            background=cleanup_files  # 响应完成后清理文件
+        )
+
+        return response
+
+    except Exception as e:
+        logger.error(f"处理图片时出错: {str(e)}")
+        # 清理文件
+        try:
+            if os.path.exists(input_path):
+                os.remove(input_path)
+            if os.path.exists(output_dir):
+                shutil.rmtree(output_dir)
+        except:
+            pass
+        raise HTTPException(status_code=500, detail=f"图片处理失败: {str(e)}")
 
 @app.post("/superres-video")
 async def superres_video(file: UploadFile = File(...)):
     unique_id = get_unique_name()
-    ext = os.path.splitext(file.filename)[1]  # 保留原始后缀
-    filename_base = f"{os.path.splitext(file.filename)[0]}_{unique_id}"
-    input_path = os.path.join(TMP_DIR, f"{filename_base}{ext}")
-    output_dir = os.path.join(TMP_DIR, filename_base)
+    ext = os.path.splitext(file.filename)[1].lower()
+    original_name = os.path.splitext(file.filename)[0]
+
+    # 输入文件路径
+    input_filename = f"{original_name}_{unique_id}{ext}"
+    input_path = os.path.join(TMP_DIR, input_filename)
+
+    # 输出目录
+    output_dir = os.path.join(TMP_DIR, f"output_{unique_id}")
     os.makedirs(output_dir, exist_ok=True)
 
-    with open(input_path, "wb") as f:
-        f.write(await file.read())
+    logger.info(f"处理视频: {file.filename}")
+    logger.info(f"输入路径: {input_path}")
+    logger.info(f"输出目录: {output_dir}")
 
-    run_realesrgan_video(input_path, output_dir, suffix=unique_id)
+    try:
+        # 保存上传的文件
+        with open(input_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
 
-    # 输出文件名加 _completed
-    original_output_file = os.path.join(output_dir, f"{filename_base}{ext}")  # RealESRGAN 输出默认带 suffix
-    completed_file = os.path.join(output_dir, f"{filename_base}_completed{ext}")
+        # 执行 RealESRGAN
+        run_realesrgan_video(input_path, output_dir, suffix=unique_id)
 
-    if not os.path.exists(original_output_file):
-        raise RuntimeError(f"输出文件不存在: {original_output_file}")
+        # 查找实际生成的输出文件
+        output_file = find_output_file(output_dir, file.filename, unique_id)
 
-    os.rename(original_output_file, completed_file)
+        if not output_file or not os.path.exists(output_file):
+            raise HTTPException(status_code=500, detail=f"找不到输出文件，输出目录: {output_dir}")
 
-    response = FileResponse(completed_file, filename=os.path.basename(completed_file))
+        # 重命名为最终文件
+        final_filename = f"{original_name}_enhanced{ext}"
+        final_path = os.path.join(output_dir, final_filename)
 
-    # 清理临时文件
-    shutil.rmtree(output_dir, ignore_errors=True)
-    if os.path.exists(input_path):
-        os.remove(input_path)
+        if output_file != final_path:
+            os.rename(output_file, final_path)
 
-    return response
+        logger.info(f"处理完成，返回文件: {final_path}")
+
+        # 返回文件
+        def cleanup_files():
+            """清理临时文件"""
+            try:
+                if os.path.exists(input_path):
+                    os.remove(input_path)
+                if os.path.exists(output_dir):
+                    shutil.rmtree(output_dir)
+                logger.info("临时文件清理完成")
+            except Exception as e:
+                logger.error(f"清理文件时出错: {e}")
+
+        response = FileResponse(
+            final_path,
+            filename=final_filename,
+            background=cleanup_files  # 响应完成后清理文件
+        )
+
+        return response
+
+    except Exception as e:
+        logger.error(f"处理视频时出错: {str(e)}")
+        # 清理文件
+        try:
+            if os.path.exists(input_path):
+                os.remove(input_path)
+            if os.path.exists(output_dir):
+                shutil.rmtree(output_dir)
+        except:
+            pass
+        raise HTTPException(status_code=500, detail=f"视频处理失败: {str(e)}")
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
