@@ -46,7 +46,6 @@ def get_unique_name():
     return str(uuid.uuid4())
 
 def run_realesrgan_image(input_path: str, output_dir: str, model_name="RealESRGAN_x4plus", suffix=""):
-    logger.info(f"Running RealESRGAN image: input={input_path}, output={output_dir}, model={model_name}, suffix={suffix}")
     cmd = [
         "python",
         "inference/inference_realesrgan.py",
@@ -56,11 +55,9 @@ def run_realesrgan_image(input_path: str, output_dir: str, model_name="RealESRGA
         "--suffix", suffix
     ]
     subprocess.run(cmd, check=True)
-    logger.info(f"RealESRGAN image finished: output_dir={output_dir}")
 
 def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-animevideov3", suffix=""):
     num_process = 1
-    logger.info(f"Running RealESRGAN video: input={input_path}, output={output_dir}, model={model_name}, suffix={suffix}")
     cmd = [
         "python",
         "inference/inference_realesrgan_video.py",
@@ -71,31 +68,31 @@ def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-a
         "--num_process", str(num_process)
     ]
     subprocess.run(cmd, check=True)
-    logger.info(f"RealESRGAN video finished: output_dir={output_dir}")
 
 @app.post("/superres-image")
 async def superres_image(file: UploadFile = File(...)):
     unique_id = get_unique_name()
+    ext = os.path.splitext(file.filename)[1]  # 保留原始后缀
     filename_base = f"{os.path.splitext(file.filename)[0]}_{unique_id}"
-    input_path = os.path.join(TMP_DIR, f"{filename_base}.jpg")
+    input_path = os.path.join(TMP_DIR, f"{filename_base}{ext}")
     output_dir = os.path.join(TMP_DIR, filename_base)
     os.makedirs(output_dir, exist_ok=True)
 
-    logger.info(f"Saving uploaded image: {input_path}")
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
     run_realesrgan_image(input_path, output_dir, suffix=unique_id)
+    logger.info(f"input_path: {input_path}\noutput_dir：{output_dir}")
 
-    # 固定输出文件名
-    original_output_file = os.path.join(output_dir, f"{filename_base}_{unique_id}.png")
-    completed_file = os.path.join(output_dir, f"{filename_base}_completed.png")
+    # 输出文件名加 _completed
+    original_output_file = os.path.join(output_dir, f"{filename_base}{ext}")  # RealESRGAN 输出默认带 suffix
+    completed_file = os.path.join(output_dir, f"{filename_base}_completed{ext}")
+    logger.info(f"original_output_file: {original_output_file}\completed_file{completed_file}")
 
     if not os.path.exists(original_output_file):
         raise RuntimeError(f"输出文件不存在: {original_output_file}")
 
     os.rename(original_output_file, completed_file)
-    logger.info(f"Completed image file: {completed_file}")
 
     response = FileResponse(completed_file, filename=os.path.basename(completed_file))
 
@@ -109,26 +106,25 @@ async def superres_image(file: UploadFile = File(...)):
 @app.post("/superres-video")
 async def superres_video(file: UploadFile = File(...)):
     unique_id = get_unique_name()
+    ext = os.path.splitext(file.filename)[1]  # 保留原始后缀
     filename_base = f"{os.path.splitext(file.filename)[0]}_{unique_id}"
-    input_path = os.path.join(TMP_DIR, f"{filename_base}.mp4")
+    input_path = os.path.join(TMP_DIR, f"{filename_base}{ext}")
     output_dir = os.path.join(TMP_DIR, filename_base)
     os.makedirs(output_dir, exist_ok=True)
 
-    logger.info(f"Saving uploaded video: {input_path}")
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
     run_realesrgan_video(input_path, output_dir, suffix=unique_id)
 
-    # 固定输出文件名
-    original_output_file = os.path.join(output_dir, f"{filename_base}_{unique_id}.mp4")
-    completed_file = os.path.join(output_dir, f"{filename_base}_completed.mp4")
+    # 输出文件名加 _completed
+    original_output_file = os.path.join(output_dir, f"{filename_base}{ext}")  # RealESRGAN 输出默认带 suffix
+    completed_file = os.path.join(output_dir, f"{filename_base}_completed{ext}")
 
     if not os.path.exists(original_output_file):
         raise RuntimeError(f"输出文件不存在: {original_output_file}")
 
     os.rename(original_output_file, completed_file)
-    logger.info(f"Completed video file: {completed_file}")
 
     response = FileResponse(completed_file, filename=os.path.basename(completed_file))
 
