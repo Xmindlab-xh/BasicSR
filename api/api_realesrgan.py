@@ -84,7 +84,7 @@ async def superres_video(
     # 调用 inference 脚本处理视频
     cmd = [
         sys.executable,
-        os.path.join(INFERENCE_DIR, "inference_realesrgan.py"),
+        os.path.join(INFERENCE_DIR, "inference_realesrgan_video.py"),
         "-i",
         input_path,
         "-o",
