@@ -3,8 +3,11 @@ import shutil
 import uuid
 import subprocess
 import logging
+import asyncio
+import threading
+import time
 from logging.handlers import TimedRotatingFileHandler
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 
 # ----------------- 日志配置 -----------------
@@ -79,7 +82,25 @@ def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-a
         raise RuntimeError(f"RealESRGAN 视频处理失败: {result.stderr}")
     return result
 
-def find_output_file(output_dir: str, original_filename: str, suffix: str):
+def cleanup_files_delayed(input_path: str, output_dir: str, delay: int = 10):
+    """延迟清理文件，给文件传输留出时间"""
+    def cleanup():
+        time.sleep(delay)  # 延迟指定秒数
+        try:
+            if os.path.exists(input_path):
+                os.remove(input_path)
+                logger.info(f"已删除输入文件: {input_path}")
+            if os.path.exists(output_dir):
+                shutil.rmtree(output_dir)
+                logger.info(f"已删除输出目录: {output_dir}")
+            logger.info("延迟清理完成")
+        except Exception as e:
+            logger.error(f"延迟清理文件时出错: {e}")
+
+    # 在后台线程中执行清理
+    cleanup_thread = threading.Thread(target=cleanup)
+    cleanup_thread.daemon = True  # 设为守护线程
+    cleanup_thread.start()
     """查找实际生成的输出文件"""
     # 可能的输出文件名格式
     base_name = os.path.splitext(original_filename)[0]
@@ -160,22 +181,13 @@ async def superres_image(file: UploadFile = File(...)):
 
         logger.info(f"处理完成，返回文件: {final_path}")
 
-        # 返回文件
-        def cleanup_files():
-            """清理临时文件"""
-            try:
-                if os.path.exists(input_path):
-                    os.remove(input_path)
-                if os.path.exists(output_dir):
-                    shutil.rmtree(output_dir)
-                logger.info("临时文件清理完成")
-            except Exception as e:
-                logger.error(f"清理文件时出错: {e}")
+        # 启动延迟清理任务
+        cleanup_files_delayed(input_path, output_dir, delay=30)  # 30秒后清理
 
+        # 返回文件
         response = FileResponse(
             final_path,
-            filename=final_filename,
-            background=cleanup_files  # 响应完成后清理文件
+            filename=final_filename
         )
 
         return response
@@ -234,22 +246,13 @@ async def superres_video(file: UploadFile = File(...)):
 
         logger.info(f"处理完成，返回文件: {final_path}")
 
-        # 返回文件
-        def cleanup_files():
-            """清理临时文件"""
-            try:
-                if os.path.exists(input_path):
-                    os.remove(input_path)
-                if os.path.exists(output_dir):
-                    shutil.rmtree(output_dir)
-                logger.info("临时文件清理完成")
-            except Exception as e:
-                logger.error(f"清理文件时出错: {e}")
+        # 启动延迟清理任务
+        cleanup_files_delayed(input_path, output_dir, delay=30)  # 30秒后清理
 
+        # 返回文件
         response = FileResponse(
             final_path,
-            filename=final_filename,
-            background=cleanup_files  # 响应完成后清理文件
+            filename=final_filename
         )
 
         return response
