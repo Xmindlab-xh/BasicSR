@@ -2,44 +2,76 @@ import os
 import shutil
 import uuid
 import subprocess
+import logging
+from logging.handlers import TimedRotatingFileHandler
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import FileResponse
+
+# ----------------- 日志配置 -----------------
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
+
+logger = logging.getLogger("superres")
+logger.setLevel(logging.INFO)
+
+# 控制台 handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter("[%(levelname)s] %(message)s")
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
+
+# 文件 handler，按天生成日志
+file_handler = TimedRotatingFileHandler(
+    filename=os.path.join(LOG_DIR, "superres.log"),
+    when="midnight",
+    interval=1,
+    backupCount=30,
+    encoding="utf-8",
+    utc=False
+)
+file_handler.setLevel(logging.INFO)
+file_formatter = logging.Formatter("[%(asctime)s][%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+file_handler.setFormatter(file_formatter)
+file_handler.suffix = "%Y-%m-%d.log"
+logger.addHandler(file_handler)
+# -------------------------------------------
 
 app = FastAPI()
 
 TMP_DIR = "temp"
 os.makedirs(TMP_DIR, exist_ok=True)
 
-
 def get_unique_name():
     return str(uuid.uuid4())
 
-
-def run_realesrgan_image(input_path: str, output_path: str, model_name="RealESRGAN_x4plus", suffix=""):
+def run_realesrgan_image(input_path: str, output_dir: str, model_name="RealESRGAN_x4plus", suffix=""):
+    logger.info(f"Running RealESRGAN image: input={input_path}, output={output_dir}, model={model_name}, suffix={suffix}")
     cmd = [
         "python",
         "inference/inference_realesrgan.py",
         "-i", input_path,
-        "-o", output_path,
+        "-o", output_dir,
         "-n", model_name,
         "--suffix", suffix
     ]
     subprocess.run(cmd, check=True)
+    logger.info(f"RealESRGAN image finished: output_dir={output_dir}")
 
-
-def run_realesrgan_video(input_path: str, output_path: str, model_name="realesr-animevideov3", suffix=""):
+def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-animevideov3", suffix=""):
     num_process = 1
+    logger.info(f"Running RealESRGAN video: input={input_path}, output={output_dir}, model={model_name}, suffix={suffix}")
     cmd = [
         "python",
         "inference/inference_realesrgan_video.py",
         "-i", input_path,
-        "-o", output_path,
+        "-o", output_dir,
         "-n", model_name,
         "--suffix", suffix,
         "--num_process", str(num_process)
     ]
     subprocess.run(cmd, check=True)
-
+    logger.info(f"RealESRGAN video finished: output_dir={output_dir}")
 
 @app.post("/superres-image")
 async def superres_image(file: UploadFile = File(...)):
@@ -49,23 +81,23 @@ async def superres_image(file: UploadFile = File(...)):
     output_dir = os.path.join(TMP_DIR, filename_base)
     os.makedirs(output_dir, exist_ok=True)
 
-    # 保存上传文件
+    logger.info(f"Saving uploaded image: {input_path}")
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    # 调用 RealESRGAN
     run_realesrgan_image(input_path, output_dir, suffix=unique_id)
 
-    # 输出文件名加 _completed
+    # 固定输出文件名
     original_output_file = os.path.join(output_dir, f"{filename_base}_{unique_id}.png")
     completed_file = os.path.join(output_dir, f"{filename_base}_completed.png")
 
-    if os.path.exists(original_output_file):
-        os.rename(original_output_file, completed_file)
-    else:
+    if not os.path.exists(original_output_file):
         raise RuntimeError(f"输出文件不存在: {original_output_file}")
 
-    response = FileResponse(completed_file, filename=f"{filename_base}_completed.png")
+    os.rename(original_output_file, completed_file)
+    logger.info(f"Completed image file: {completed_file}")
+
+    response = FileResponse(completed_file, filename=os.path.basename(completed_file))
 
     # 清理临时文件
     shutil.rmtree(output_dir, ignore_errors=True)
@@ -73,7 +105,6 @@ async def superres_image(file: UploadFile = File(...)):
         os.remove(input_path)
 
     return response
-
 
 @app.post("/superres-video")
 async def superres_video(file: UploadFile = File(...)):
@@ -83,23 +114,23 @@ async def superres_video(file: UploadFile = File(...)):
     output_dir = os.path.join(TMP_DIR, filename_base)
     os.makedirs(output_dir, exist_ok=True)
 
-    # 保存上传文件
+    logger.info(f"Saving uploaded video: {input_path}")
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    # 调用 RealESRGAN 视频处理
     run_realesrgan_video(input_path, output_dir, suffix=unique_id)
 
-    # 输出文件名加 _completed
+    # 固定输出文件名
     original_output_file = os.path.join(output_dir, f"{filename_base}_{unique_id}.mp4")
     completed_file = os.path.join(output_dir, f"{filename_base}_completed.mp4")
 
-    if os.path.exists(original_output_file):
-        os.rename(original_output_file, completed_file)
-    else:
+    if not os.path.exists(original_output_file):
         raise RuntimeError(f"输出文件不存在: {original_output_file}")
 
-    response = FileResponse(completed_file, filename=f"{filename_base}_completed.mp4")
+    os.rename(original_output_file, completed_file)
+    logger.info(f"Completed video file: {completed_file}")
+
+    response = FileResponse(completed_file, filename=os.path.basename(completed_file))
 
     # 清理临时文件
     shutil.rmtree(output_dir, ignore_errors=True)
