@@ -15,42 +15,29 @@ def get_unique_name():
     return str(uuid.uuid4())
 
 
-def run_realesrgan_image(
-    input_path: str, output_path: str, model_name="RealESRGAN_x4plus", suffix=""
-):
+def run_realesrgan_image(input_path: str, output_path: str, model_name="RealESRGAN_x4plus", suffix=""):
     cmd = [
         "python",
         "inference/inference_realesrgan.py",
-        "-i",
-        input_path,
-        "-o",
-        output_path,
-        "-n",
-        model_name,
-        "--suffix",
-        suffix,
+        "-i", input_path,
+        "-o", output_path,
+        "-n", model_name,
+        "--suffix", suffix
     ]
     subprocess.run(cmd, check=True)
 
 
-def run_realesrgan_video(
-    input_path: str, output_path: str, model_name="realesr-animevideov3", suffix=""
-):
+def run_realesrgan_video(input_path: str, output_path: str, model_name="realesr-animevideov3", suffix=""):
     # 避免并行进程数为0导致报错
     num_process = 1
     cmd = [
         "python",
         "inference/inference_realesrgan_video.py",
-        "-i",
-        input_path,
-        "-o",
-        output_path,
-        "-n",
-        model_name,
-        "--suffix",
-        suffix,
-        "--num_process",
-        str(num_process),
+        "-i", input_path,
+        "-o", output_path,
+        "-n", model_name,
+        "--suffix", suffix,
+        "--num_process", str(num_process)
     ]
     subprocess.run(cmd, check=True)
 
@@ -71,10 +58,7 @@ async def superres_image(file: UploadFile = File(...)):
     run_realesrgan_image(input_path, output_path, suffix=file_id)
 
     # 拼接输出文件路径
-    result_file = os.path.join(
-        output_path,
-        f"{os.path.splitext(os.path.basename(input_path))[0]}_{file_id}.png",
-    )
+    result_file = os.path.join(output_path, f"{os.path.splitext(os.path.basename(input_path))[0]}_{file_id}.png")
     if not os.path.exists(result_file):
         raise RuntimeError(f"输出文件不存在: {result_file}")
 
@@ -98,10 +82,7 @@ async def superres_video(file: UploadFile = File(...)):
 
     # 拼接输出文件路径
     # 视频输出通常是 output_path 下的 {原文件名}_{suffix}.mp4
-    result_file = os.path.join(
-        output_path,
-        f"{os.path.splitext(os.path.basename(input_path))[0]}_{file_id}.mp4",
-    )
+    result_file = os.path.join(output_path, f"{os.path.splitext(os.path.basename(input_path))[0]}_{file_id}.mp4")
     if not os.path.exists(result_file):
         raise RuntimeError(f"输出文件不存在: {result_file}")
 
