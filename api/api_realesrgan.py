@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 
 app = FastAPI()
 
-TMP_DIR = "tmp"
+TMP_DIR = "temp"
 os.makedirs(TMP_DIR, exist_ok=True)
 
 
@@ -28,7 +28,6 @@ def run_realesrgan_image(input_path: str, output_path: str, model_name="RealESRG
 
 
 def run_realesrgan_video(input_path: str, output_path: str, model_name="realesr-animevideov3", suffix=""):
-    # 避免并行进程数为0导致报错
     num_process = 1
     cmd = [
         "python",
@@ -44,46 +43,67 @@ def run_realesrgan_video(input_path: str, output_path: str, model_name="realesr-
 
 @app.post("/superres-image")
 async def superres_image(file: UploadFile = File(...)):
-    file_id = get_unique_name()
-    input_path = os.path.join(TMP_DIR, f"{file_id}_input.jpg")
-    output_path = os.path.join(TMP_DIR, file_id)  # 目录形式，避免 suffix 冲突
+    unique_id = get_unique_name()
+    filename_base = f"{os.path.splitext(file.filename)[0]}_{unique_id}"
+    input_path = os.path.join(TMP_DIR, f"{filename_base}.jpg")
+    output_dir = os.path.join(TMP_DIR, filename_base)
+    os.makedirs(output_dir, exist_ok=True)
 
     # 保存上传文件
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    os.makedirs(output_path, exist_ok=True)
-
     # 调用 RealESRGAN
-    run_realesrgan_image(input_path, output_path, suffix=file_id)
+    run_realesrgan_image(input_path, output_dir, suffix=unique_id)
 
-    # 拼接输出文件路径
-    result_file = os.path.join(output_path, f"{os.path.splitext(os.path.basename(input_path))[0]}_{file_id}.png")
-    if not os.path.exists(result_file):
-        raise RuntimeError(f"输出文件不存在: {result_file}")
+    # 输出文件名加 _completed
+    original_output_file = os.path.join(output_dir, f"{filename_base}_{unique_id}.png")
+    completed_file = os.path.join(output_dir, f"{filename_base}_completed.png")
 
-    return FileResponse(result_file, filename=f"sr_{file.filename}")
+    if os.path.exists(original_output_file):
+        os.rename(original_output_file, completed_file)
+    else:
+        raise RuntimeError(f"输出文件不存在: {original_output_file}")
+
+    response = FileResponse(completed_file, filename=f"{filename_base}_completed.png")
+
+    # 清理临时文件
+    shutil.rmtree(output_dir, ignore_errors=True)
+    if os.path.exists(input_path):
+        os.remove(input_path)
+
+    return response
 
 
 @app.post("/superres-video")
 async def superres_video(file: UploadFile = File(...)):
-    file_id = get_unique_name()
-    input_path = os.path.join(TMP_DIR, f"{file_id}_input.mp4")
-    output_path = os.path.join(TMP_DIR, file_id)  # 目录形式
+    unique_id = get_unique_name()
+    filename_base = f"{os.path.splitext(file.filename)[0]}_{unique_id}"
+    input_path = os.path.join(TMP_DIR, f"{filename_base}.mp4")
+    output_dir = os.path.join(TMP_DIR, filename_base)
+    os.makedirs(output_dir, exist_ok=True)
 
     # 保存上传文件
     with open(input_path, "wb") as f:
         f.write(await file.read())
 
-    os.makedirs(output_path, exist_ok=True)
-
     # 调用 RealESRGAN 视频处理
-    run_realesrgan_video(input_path, output_path, suffix=file_id)
+    run_realesrgan_video(input_path, output_dir, suffix=unique_id)
 
-    # 拼接输出文件路径
-    # 视频输出通常是 output_path 下的 {原文件名}_{suffix}.mp4
-    result_file = os.path.join(output_path, f"{os.path.splitext(os.path.basename(input_path))[0]}_{file_id}.mp4")
-    if not os.path.exists(result_file):
-        raise RuntimeError(f"输出文件不存在: {result_file}")
+    # 输出文件名加 _completed
+    original_output_file = os.path.join(output_dir, f"{filename_base}_{unique_id}.mp4")
+    completed_file = os.path.join(output_dir, f"{filename_base}_completed.mp4")
 
-    return FileResponse(result_file, filename=f"sr_{file.filename}")
+    if os.path.exists(original_output_file):
+        os.rename(original_output_file, completed_file)
+    else:
+        raise RuntimeError(f"输出文件不存在: {original_output_file}")
+
+    response = FileResponse(completed_file, filename=f"{filename_base}_completed.mp4")
+
+    # 清理临时文件
+    shutil.rmtree(output_dir, ignore_errors=True)
+    if os.path.exists(input_path):
+        os.remove(input_path)
+
+    return response
