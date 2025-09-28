@@ -1,121 +1,108 @@
-from fastapi import FastAPI, File, UploadFile, BackgroundTasks, HTTPException
-from fastapi.responses import FileResponse
-import shutil
 import os
+import shutil
 import uuid
 import subprocess
-import sys
-import glob
-import time
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import FileResponse
 
-app = FastAPI(title="Real-ESRGAN API with Auto Cleanup")
+app = FastAPI()
 
 TMP_DIR = "tmp"
 os.makedirs(TMP_DIR, exist_ok=True)
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-INFERENCE_DIR = os.path.join(BASE_DIR, "inference")
+
+def get_unique_name():
+    return str(uuid.uuid4())
 
 
-def cleanup_files(*file_paths):
-    """后台删除临时文件"""
-    for path in file_paths:
-        try:
-            if os.path.exists(path):
-                os.remove(path)
-        except Exception as e:
-            print(f"清理文件失败: {path}, 错误: {e}")
+def run_realesrgan_image(
+    input_path: str, output_path: str, model_name="RealESRGAN_x4plus", suffix=""
+):
+    cmd = [
+        "python",
+        "inference/inference_realesrgan.py",
+        "-i",
+        input_path,
+        "-o",
+        output_path,
+        "-n",
+        model_name,
+        "--suffix",
+        suffix,
+    ]
+    subprocess.run(cmd, check=True)
 
 
-def find_latest_file(pattern: str, timeout=60):
-    """
-    根据通配符查找最新的文件，等待最多timeout秒
-    """
-    start = time.time()
-    while time.time() - start < timeout:
-        files = glob.glob(pattern)
-        if files:
-            # 返回最新修改的文件
-            return max(files, key=os.path.getmtime)
-        time.sleep(0.5)
-    return None
+def run_realesrgan_video(
+    input_path: str, output_path: str, model_name="realesr-animevideov3", suffix=""
+):
+    # 避免并行进程数为0导致报错
+    num_process = 1
+    cmd = [
+        "python",
+        "inference/inference_realesrgan_video.py",
+        "-i",
+        input_path,
+        "-o",
+        output_path,
+        "-n",
+        model_name,
+        "--suffix",
+        suffix,
+        "--num_process",
+        str(num_process),
+    ]
+    subprocess.run(cmd, check=True)
 
 
 @app.post("/superres-image")
-async def superres_image(
-    file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()
-):
-    ext = os.path.splitext(file.filename)[1]
-    img_id = str(uuid.uuid4())
-    input_path = os.path.join(TMP_DIR, f"{img_id}_input{ext}")
+async def superres_image(file: UploadFile = File(...)):
+    file_id = get_unique_name()
+    input_path = os.path.join(TMP_DIR, f"{file_id}_input.jpg")
+    output_path = os.path.join(TMP_DIR, file_id)  # 目录形式，避免 suffix 冲突
 
+    # 保存上传文件
     with open(input_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        f.write(await file.read())
 
-    cmd = [
-        sys.executable,
-        os.path.join(INFERENCE_DIR, "inference_realesrgan.py"),
-        "-i",
-        input_path,
-        "-o",
-        TMP_DIR,
-        "-n",
-        "RealESRGAN_x4plus",
-        "--suffix",
-        img_id,
-    ]
-    subprocess.run(cmd, check=True)
+    os.makedirs(output_path, exist_ok=True)
 
-    # 动态查找输出
-    pattern = os.path.join(TMP_DIR, f"*{img_id}*{ext}")
-    result_file = find_latest_file(pattern)
+    # 调用 RealESRGAN
+    run_realesrgan_image(input_path, output_path, suffix=file_id)
 
-    if not result_file or not os.path.exists(result_file):
-        cleanup_files(input_path)
-        raise HTTPException(status_code=500, detail="处理图片失败，未生成输出文件")
-
-    background_tasks.add_task(cleanup_files, input_path, result_file)
-
-    return FileResponse(
-        result_file, filename=f"superres_{file.filename}", background=background_tasks
+    # 拼接输出文件路径
+    result_file = os.path.join(
+        output_path,
+        f"{os.path.splitext(os.path.basename(input_path))[0]}_{file_id}.png",
     )
+    if not os.path.exists(result_file):
+        raise RuntimeError(f"输出文件不存在: {result_file}")
+
+    return FileResponse(result_file, filename=f"sr_{file.filename}")
 
 
 @app.post("/superres-video")
-async def superres_video(
-    file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()
-):
-    ext = os.path.splitext(file.filename)[1]
-    video_id = str(uuid.uuid4())
-    input_path = os.path.join(TMP_DIR, f"{video_id}_input{ext}")
+async def superres_video(file: UploadFile = File(...)):
+    file_id = get_unique_name()
+    input_path = os.path.join(TMP_DIR, f"{file_id}_input.mp4")
+    output_path = os.path.join(TMP_DIR, file_id)  # 目录形式
 
+    # 保存上传文件
     with open(input_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+        f.write(await file.read())
 
-    cmd = [
-        sys.executable,
-        os.path.join(INFERENCE_DIR, "inference_realesrgan_video.py"),
-        "-i",
-        input_path,
-        "-o",
-        TMP_DIR,
-        "-n",
-        "realesr-animevideov3",
-        "--suffix",
-        video_id,
-    ]
-    subprocess.run(cmd, check=True)
+    os.makedirs(output_path, exist_ok=True)
 
-    # 动态查找输出
-    pattern = os.path.join(TMP_DIR, f"*{video_id}*.mp4")
-    result_file = find_latest_file(pattern)
+    # 调用 RealESRGAN 视频处理
+    run_realesrgan_video(input_path, output_path, suffix=file_id)
 
-    if not result_file or not os.path.exists(result_file):
-        cleanup_files(input_path)
-        raise HTTPException(status_code=500, detail="处理视频失败，未生成输出文件")
-
-    background_tasks.add_task(cleanup_files, input_path, result_file)
-
-    return FileResponse(
-        result_file, filename=f"superres_{file.filename}", background=background_tasks
+    # 拼接输出文件路径
+    # 视频输出通常是 output_path 下的 {原文件名}_{suffix}.mp4
+    result_file = os.path.join(
+        output_path,
+        f"{os.path.splitext(os.path.basename(input_path))[0]}_{file_id}.mp4",
     )
+    if not os.path.exists(result_file):
+        raise RuntimeError(f"输出文件不存在: {result_file}")
+
+    return FileResponse(result_file, filename=f"sr_{file.filename}")
