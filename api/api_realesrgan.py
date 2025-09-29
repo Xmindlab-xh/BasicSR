@@ -48,33 +48,6 @@ os.makedirs(TMP_DIR, exist_ok=True)
 def get_unique_name():
     return str(uuid.uuid4())
 
-def run_realesrgan_image(input_path: str, output_dir: str, model_name="RealESRGAN_x4plus", suffix=""):
-    cmd = [
-        "python",
-        "inference/inference_realesrgan.py",
-        "-i", input_path,
-        "-o", output_dir,
-        "-n", model_name,
-    ]
-    if suffix:
-        cmd.extend(["--suffix", suffix])
-    logger.info(f"执行命令: {' '.join(cmd)}")
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    # 记录详细的输出信息
-    logger.info(f"命令返回码: {result.returncode}")
-    if result.stdout:
-        logger.info(f"标准输出: {result.stdout}")
-    if result.stderr:
-        logger.info(f"标准错误: {result.stderr}")
-
-    if result.returncode != 0:
-        error_msg = f"RealESRGAN 执行失败 (返回码: {result.returncode})\n标准错误: {result.stderr}\n标准输出: {result.stdout}"
-        logger.error(error_msg)
-        raise RuntimeError(error_msg)
-
-    return result
 
 def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-animevideov3", suffix: str | None = None):
     # 检查输入文件
@@ -84,7 +57,6 @@ def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-a
     file_size = os.path.getsize(input_path)
     logger.info(f"输入文件大小: {file_size / 1024 / 1024:.2f} MB")
 
-    num_process = 1
     cmd = [
         "python",
         "inference/inference_realesrgan_video.py",
@@ -94,10 +66,16 @@ def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-a
     ]
     if suffix:
         cmd.extend(["--suffix", suffix])
-    cmd.extend(["--num_process", str(num_process)])
+    cmd.extend(["--num_process_per_gpu", "1"])
     logger.info(f"执行命令: {' '.join(cmd)}")
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    env = os.environ.copy()
+    if "CUDA_VISIBLE_DEVICES" in env:
+        env["CUDA_VISIBLE_DEVICES"] = env["CUDA_VISIBLE_DEVICES"].split(",")[0].strip()
+    else:
+        env["CUDA_VISIBLE_DEVICES"] = "0"
+
+    result = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
     # 记录详细的输出信息
     logger.info(f"命令返回码: {result.returncode}")
