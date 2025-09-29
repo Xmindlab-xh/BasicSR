@@ -1,0 +1,6 @@
+experiments/pretrained_models/
+temp/
+logs/
+__pycache__/
+*.pt
+*.pth
