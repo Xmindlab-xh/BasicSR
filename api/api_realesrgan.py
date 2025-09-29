@@ -58,13 +58,31 @@ def run_realesrgan_image(input_path: str, output_dir: str, model_name="RealESRGA
         "--suffix", suffix
     ]
     logger.info(f"执行命令: {' '.join(cmd)}")
+
     result = subprocess.run(cmd, capture_output=True, text=True)
+
+    # 记录详细的输出信息
+    logger.info(f"命令返回码: {result.returncode}")
+    if result.stdout:
+        logger.info(f"标准输出: {result.stdout}")
+    if result.stderr:
+        logger.info(f"标准错误: {result.stderr}")
+
     if result.returncode != 0:
-        logger.error(f"RealESRGAN 执行失败: {result.stderr}")
-        raise RuntimeError(f"RealESRGAN 执行失败: {result.stderr}")
+        error_msg = f"RealESRGAN 执行失败 (返回码: {result.returncode})\n标准错误: {result.stderr}\n标准输出: {result.stdout}"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
+
     return result
 
 def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-animevideov3", suffix=""):
+    # 检查输入文件
+    if not os.path.exists(input_path):
+        raise RuntimeError(f"输入文件不存在: {input_path}")
+
+    file_size = os.path.getsize(input_path)
+    logger.info(f"输入文件大小: {file_size / 1024 / 1024:.2f} MB")
+
     num_process = 1
     cmd = [
         "python",
@@ -76,10 +94,21 @@ def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-a
         "--num_process", str(num_process)
     ]
     logger.info(f"执行命令: {' '.join(cmd)}")
+
     result = subprocess.run(cmd, capture_output=True, text=True)
+
+    # 记录详细的输出信息
+    logger.info(f"命令返回码: {result.returncode}")
+    if result.stdout:
+        logger.info(f"标准输出: {result.stdout}")
+    if result.stderr:
+        logger.info(f"标准错误: {result.stderr}")
+
     if result.returncode != 0:
-        logger.error(f"RealESRGAN 视频处理失败: {result.stderr}")
-        raise RuntimeError(f"RealESRGAN 视频处理失败: {result.stderr}")
+        error_msg = f"RealESRGAN 视频处理失败 (返回码: {result.returncode})\n标准错误: {result.stderr}\n标准输出: {result.stdout}"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
+
     return result
 
 def cleanup_files_delayed(input_path: str, output_dir: str, delay: int = 10):
@@ -103,43 +132,6 @@ def cleanup_files_delayed(input_path: str, output_dir: str, delay: int = 10):
     cleanup_thread.start()
 
 def find_output_file(output_dir: str, original_filename: str, suffix: str):
-    """查找实际生成的输出文件"""
-    # 可能的输出文件名格式
-    base_name = os.path.splitext(original_filename)[0]
-    ext = os.path.splitext(original_filename)[1]
-
-    possible_names = [
-        f"{base_name}_{suffix}_out{ext}",  # 常见格式: filename_suffix_out.ext
-        f"{base_name}_out{ext}",          # 格式: filename_out.ext
-        f"{base_name}_{suffix}{ext}",     # 格式: filename_suffix.ext
-        f"{base_name}{ext}",              # 原文件名
-    ]
-
-    logger.info(f"查找输出文件，目录: {output_dir}")
-    logger.info(f"可能的文件名: {possible_names}")
-
-    # 列出输出目录中的所有文件进行调试
-    if os.path.exists(output_dir):
-        files_in_dir = os.listdir(output_dir)
-        logger.info(f"输出目录中的文件: {files_in_dir}")
-
-        # 先检查预期的文件名
-        for name in possible_names:
-            full_path = os.path.join(output_dir, name)
-            if os.path.exists(full_path):
-                logger.info(f"找到输出文件: {full_path}")
-                return full_path
-
-        # 如果找不到预期文件名，返回目录中第一个文件（如果有的话）
-        if files_in_dir:
-            # 过滤掉可能的输入文件，只要处理后的文件
-            processed_files = [f for f in files_in_dir if not f.endswith('_input' + ext)]
-            if processed_files:
-                found_file = os.path.join(output_dir, processed_files[0])
-                logger.info(f"使用找到的文件: {found_file}")
-                return found_file
-
-    return None
     """查找实际生成的输出文件"""
     # 可能的输出文件名格式
     base_name = os.path.splitext(original_filename)[0]
