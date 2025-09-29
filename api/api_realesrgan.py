@@ -91,9 +91,10 @@ def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-a
         "-i", input_path,
         "-o", output_dir,
         "-n", model_name,
-        "--suffix", suffix,
-        "--num_process", str(num_process)
     ]
+    if suffix:
+        cmd.extend(["--suffix", suffix])
+    cmd.extend(["--num_process", str(num_process)])
     logger.info(f"执行命令: {' '.join(cmd)}")
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -149,18 +150,22 @@ def cleanup_files_delayed(input_path: str, output_dir: str, delay: int = 10):
     cleanup_thread.daemon = True  # 设为守护线程
     cleanup_thread.start()
 
-def find_output_file(output_dir: str, original_filename: str, suffix: str):
+def find_output_file(output_dir: str, original_filename: str, suffix: str | None):
     """查找实际生成的输出文件"""
     # 可能的输出文件名格式
     base_name = os.path.splitext(original_filename)[0]
     ext = os.path.splitext(original_filename)[1]
 
-    possible_names = [
-        f"{base_name}_{suffix}_out{ext}",  # 常见格式: filename_suffix_out.ext
-        f"{base_name}_out{ext}",          # 格式: filename_out.ext
-        f"{base_name}_{suffix}{ext}",     # 格式: filename_suffix.ext
-        f"{base_name}{ext}",              # 原文件名
-    ]
+    possible_names: list[str] = []
+    if suffix:
+        possible_names.extend([
+            f"{base_name}_{suffix}_out{ext}",
+            f"{base_name}_{suffix}{ext}",
+        ])
+    possible_names.extend([
+        f"{base_name}_out{ext}",
+        f"{base_name}{ext}",
+    ])
 
     logger.info(f"查找输出文件，目录: {output_dir}")
     logger.info(f"可能的文件名: {possible_names}")
@@ -278,10 +283,10 @@ async def superres_video(file: UploadFile = File(...)):
             f.write(content)
 
         # 执行 RealESRGAN
-        run_realesrgan_video(input_path, output_dir, suffix=unique_id)
+        run_realesrgan_video(input_path, output_dir)
 
         # 查找实际生成的输出文件
-        output_file = find_output_file(output_dir, file.filename, unique_id)
+        output_file = find_output_file(output_dir, file.filename, None)
 
         if not output_file or not os.path.exists(output_file):
             raise HTTPException(status_code=500, detail=f"找不到输出文件，输出目录: {output_dir}")
