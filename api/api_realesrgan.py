@@ -55,8 +55,9 @@ def run_realesrgan_image(input_path: str, output_dir: str, model_name="RealESRGA
         "-i", input_path,
         "-o", output_dir,
         "-n", model_name,
-        "--suffix", suffix
     ]
+    if suffix:
+        cmd.extend(["--suffix", suffix])
     logger.info(f"执行命令: {' '.join(cmd)}")
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -75,7 +76,7 @@ def run_realesrgan_image(input_path: str, output_dir: str, model_name="RealESRGA
 
     return result
 
-def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-animevideov3", suffix=""):
+def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-animevideov3", suffix: str | None = None):
     # 检查输入文件
     if not os.path.exists(input_path):
         raise RuntimeError(f"输入文件不存在: {input_path}")
