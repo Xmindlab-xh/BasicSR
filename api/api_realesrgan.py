@@ -104,7 +104,24 @@ def run_realesrgan_video(input_path: str, output_dir: str, model_name="realesr-a
     if result.stderr:
         logger.info(f"标准错误: {result.stderr}")
 
-    if result.returncode != 0:
+    # 检查输出目录中的文件（无论返回码如何）
+    if os.path.exists(output_dir):
+        files_after = os.listdir(output_dir)
+        logger.info(f"处理后输出目录中的文件: {files_after}")
+
+        # 检查是否有临时目录
+        temp_video_dir = None
+        for f in files_after:
+            if f.endswith('_out_tmp_videos') and os.path.isdir(os.path.join(output_dir, f)):
+                temp_video_dir = os.path.join(output_dir, f)
+                break
+
+        if temp_video_dir:
+            temp_files = os.listdir(temp_video_dir)
+            logger.info(f"临时视频目录 {temp_video_dir} 中的文件: {temp_files}")
+
+    # 即使返回码为0，如果stderr中包含Error，也认为是失败
+    if result.returncode != 0 or (result.stderr and "Error" in result.stderr):
         error_msg = f"RealESRGAN 视频处理失败 (返回码: {result.returncode})\n标准错误: {result.stderr}\n标准输出: {result.stdout}"
         logger.error(error_msg)
         raise RuntimeError(error_msg)
